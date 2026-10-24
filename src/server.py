@@ -152,4 +152,10 @@ class ChatServer:
 
 
 if __name__ == "__main__":
-    ChatServer().start()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Chat relay server")
+    parser.add_argument("--host", default=HOST, help="Address to listen on")
+    parser.add_argument("--port", type=int, default=PORT, help="Port to listen on (use 9001 when the MITM proxy holds 9000)")
+    args = parser.parse_args()
+    ChatServer(args.host, args.port).start()

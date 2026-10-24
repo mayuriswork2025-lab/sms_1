@@ -34,7 +34,7 @@ Built entirely using Python and standard cryptographic primitives, the system su
 | **Network Relay** | `src/server.py` | TCP Sockets + Frame Buffering | Unicast relay forwarding ciphertext without accessing plaintext. |
 | **Client Application** | `src/client.py` | Multi-threaded Socket Engine | Manages handshakes, certificate verification, and interactive encrypted chat. |
 | **Adversarial Testing** | `tests/mitm_test.py` | Automated Dolev-Yao Attack Harness | Tests eavesdropping, key substitution, cert forgery, and tampering. |
-| **Traffic Inspection** | `logs/traffic_capture.log` | Wireshark-compatible Frame Log | Records real-time packet transmissions and adversary interception events. |
+| **Traffic Inspection** | `captures/*.pcapng` | Wireshark captures | Live MITM runs recorded on the loopback adapter: attack succeeding without certificates and blocked with them. |
 
 ---
 
@@ -74,7 +74,7 @@ Attack Scenario                  | Attacker Goal                | Defense Result
 python src/ca.py init
 
 # Run all 36 unit and integration tests
-python -m unittest discover tests -p "*test*.py" -v
+python -m unittest discover -s tests -p "*.py" -v
 
 # Run the adversarial MITM test simulation
 python tests/mitm_test.py

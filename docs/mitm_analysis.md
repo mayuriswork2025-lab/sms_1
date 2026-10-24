@@ -135,23 +135,76 @@ We subjected Phase 4 to four distinct adversarial vectors:
 
 ---
 
-## 5. Packet Capture Artifact
+## 5. Live MITM Test with Wireshark Captures
 
-The captured frame log is generated at:
+The scenarios above were first checked in an automated, in-process simulation (`tests/mitm_test.py`). That simulation uses mock sockets, so it is not network evidence. The results in this section come from a **live attack over real TCP connections**, with one team member operating the attacker and the traffic recorded in Wireshark.
+
+### 5.1 Setup
+
 ```text
-logs/traffic_capture.log
+alice/bob --> 127.0.0.1:9000 [attacks/mitm_proxy.py] --> 127.0.0.1:9001 [src/server.py]
 ```
-The log documents exact timestamps, port source/destination addresses, frame types, and adversary interception markers.
+
+- **Attacker:** `attacks/mitm_proxy.py` in `swap` mode. Mallory replaces each DH public value with her own, re-signs it with her own Ed25519 key, and forwards the victim's real certificate unchanged.
+- **Capture:** Wireshark on the Npcap loopback adapter, filter `tcp.port == 9000 || tcp.port == 9001`.
+- **Operated by:** _<team member name>_
+
+### 5.2 Run A: passive eavesdropping (`--mode watch`)
+
+Mallory forwards traffic unchanged. Every chat frame carries only base64 ciphertext.
+
+- Capture file: `captures/01-passive.pcapng`
+- Screenshot: _<insert docs/images/01-passive-wireshark.png>_
+
+### 5.3 Run B: DH key substitution without certificates (`--no-cert`) — attack succeeds
+
+Both clients skip certificate checks, so they accept any signing key that arrives with a DH value.
+
+Observed:
+- Mallory's terminal: `SWAPPED alice's DH value and signing key with Mallory's own`, then `*** READ alice -> bob: 'My bank PIN is 1234' ***`
+- Bob's terminal: the message is shown with `(signature verified)`. Bob cannot tell he is talking to Mallory.
+- Wireshark: Alice's `public_key` on the port 9000 stream (Alice → Mallory) differs from the `public_key` on the port 9001 stream (Mallory → server). The substitution is visible on the wire.
+
+- Capture file: `captures/02-mitm-success.pcapng`
+- Screenshots: _<insert docs/images/02-mallory-reads.png>_, _<insert docs/images/02-wireshark-port9000.png>_, _<insert docs/images/02-wireshark-port9001.png>_
+
+### 5.4 Run C: DH key substitution with certificates — attack blocked
+
+Same attack, with certificate verification on (the default).
+
+Observed:
+- Bob's terminal: `[security] Rejected DH public value from alice: signing key does not match certificate public key`
+- Alice's terminal: no session is created; `/msg bob ...` returns `No session with bob yet`.
+- Mallory's terminal: no `READ` line. She obtains no plaintext.
+
+Why it fails: Mallory can forward Alice's genuine certificate, but that certificate binds the name "alice" to Alice's public key. Mallory cannot produce a signature with Alice's private key, and if she substitutes her own signing key, it no longer matches the certificate. If she forges a certificate instead, it fails the CA signature check.
+
+- Capture file: `captures/03-mitm-blocked.pcapng`
+- Screenshots: _<insert docs/images/03-bob-rejects.png>_, _<insert docs/images/03-wireshark.png>_
+
+### 5.5 Result
+
+| Run | Certificates | Attack | Outcome |
+|---|---|---|---|
+| A | on | Passive sniffing | Only ciphertext visible |
+| B | off (`--no-cert`) | DH key substitution | **Succeeds**: Mallory reads every message |
+| C | on | DH key substitution | **Blocked**: handshake rejected, no session |
 
 ---
 
 ## 6. How to Reproduce
 
-Run the full adversarial testing harness:
+Live attack (four terminals, from the project root):
+```bash
+python src/server.py --port 9001
+python attacks/mitm_proxy.py --mode swap      # or --mode watch
+python src/client.py --username bob [--no-cert]
+python src/client.py --username alice [--no-cert]
+```
+In Alice's terminal: `/dh bob`, then `/msg bob <text>`.
+
+Automated simulation of all scenarios:
 ```bash
 python tests/mitm_test.py
-```
-Or run as automated unittests:
-```bash
 python -m unittest tests/mitm_test.py -v
 ```

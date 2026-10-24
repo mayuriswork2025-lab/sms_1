@@ -6,7 +6,7 @@ import time
 from typing import Dict
 
 try:
-    from src.ca import CertificateAuthority, cert_to_pem
+    from src.ca import CertificateAuthority
     from src.crypto import DecryptionError, SessionCipher, chat_associated_data
     from src.dh import compute_public_key, compute_shared_secret, derive_session_key, generate_private_key
     from src.message_format import (
@@ -19,7 +19,7 @@ try:
     from src.protocol import MessageReader, ProtocolDecodeError, default_protocol
     from src.signing import SigningIdentity, verify
 except ImportError:
-    from ca import CertificateAuthority, cert_to_pem
+    from ca import CertificateAuthority
     from crypto import DecryptionError, SessionCipher, chat_associated_data
     from dh import compute_public_key, compute_shared_secret, derive_session_key, generate_private_key
     from message_format import (
@@ -77,12 +77,12 @@ class ChatClient:
         except Exception:
             self.ca = None
 
-        # Load or generate signing identity
+        # Load or generate signing identity. Certificates are issued only by the
+        # CA administrator (python src/ca.py issue <username>); a client never
+        # signs its own certificate, even if the CA private key is reachable.
         self.identity = SigningIdentity.load_or_generate(self.username, certs_dir=self.certs_dir)
-        # In a lab setting, auto-issue certificate if root CA is available locally
-        if self.identity.certificate_pem is None and self.ca and self.ca.ca_private_key:
-            cert = self.ca.issue_certificate(self.username, self.identity.private_key.public_key())
-            self.identity.set_certificate(cert_to_pem(cert))
+        if self.identity.certificate_pem is None:
+            print(f"[ca] No certificate for {self.username}. Ask the CA admin to run: python src/ca.py issue {self.username}")
 
         self.sock: socket.socket | None = None
 
@@ -120,7 +120,10 @@ class ChatClient:
         print("Type 'quit' to exit.")
 
         while True:
-            text = input("> ")
+            try:
+                text = input("> ")
+            except EOFError:
+                break
             stripped = text.strip()
 
             if stripped.lower() == "quit":

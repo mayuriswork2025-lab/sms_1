@@ -27,7 +27,7 @@ The objective of **Project 12** is to build a complete, production-grade secure 
 | **#45** | Months 1–2 | Plaintext messaging skeleton; framing protocol (`\n`-delimited JSON); TCP server/client relay. | **COMPLETED** |
 | **#46** | Months 2–3 | Diffie-Hellman (RFC 3526 Group 14); session key derivation (SHA-256); AES-256-GCM encryption; Ed25519 digital signatures. | **COMPLETED** |
 | **#47** | Months 3–4 | Certificate Authority workflow (`src/ca.py`); X.509 v3 certificate issuance; 6-step trust chain validation; CRL revocation tracking. | **COMPLETED** |
-| **#48** | Months 5–6 | Adversarial MITM test harness (`tests/mitm_test.py`); Wireshark-compatible packet logging (`logs/traffic_capture.log`); STRIDE threat model; final report and viva preparation. | **COMPLETED** |
+| **#48** | Months 5–6 | Live MITM proxy (`attacks/mitm_proxy.py`) with Wireshark captures (`captures/`); automated adversarial test suite (`tests/mitm_test.py`); STRIDE threat model; final report and viva preparation. | **COMPLETED** |
 
 ---
 
@@ -218,14 +218,15 @@ CN_SMS/
 │   └── utils.py                  # Logging helpers
 ├── certs/
 │   ├── ca.pem                    # Root CA public certificate
-│   ├── ca_key.pem                # Root CA private key
+│   ├── ca_key.pem                # Root CA private key (git-ignored, CA admin only)
 │   ├── alice.pem                 # Alice identity certificate
-│   ├── alice_key.pem             # Alice private signing key
+│   ├── alice_key.pem             # Alice private signing key (git-ignored)
 │   ├── bob.pem                   # Bob identity certificate
-│   ├── bob_key.pem               # Bob private signing key
+│   ├── bob_key.pem               # Bob private signing key (git-ignored)
 │   └── crl.txt                   # Certificate Revocation List
-├── logs/
-│   └── traffic_capture.log       # Network packet traces & MITM logs
+├── attacks/
+│   └── mitm_proxy.py             # Live man-in-the-middle proxy (Mallory)
+├── captures/                     # Wireshark .pcapng captures of the live MITM runs
 └── tests/
     ├── test_encryption_and_signing.py # Phase 3 unit tests
     ├── test_ca_and_trust.py           # Phase 4 CA & trust chain tests
@@ -238,12 +239,16 @@ CN_SMS/
 python src/ca.py init
 
 # 2. Run all unit and integration tests (36 tests)
-python -m unittest discover tests -p "*test*.py" -v
+python -m unittest discover -s tests -p "*.py" -v
 
-# 3. Run standalone adversarial MITM simulation
+# 3. Run the live MITM demo (see README: Live MITM demo with Wireshark)
+python src/server.py --port 9001
+python attacks/mitm_proxy.py --mode swap
+
+# 4. Run the automated adversarial MITM simulation
 python tests/mitm_test.py
 
-# 4. Standalone cryptographic primitives checks
+# 5. Standalone cryptographic primitives checks
 python src/dh.py
 python src/crypto.py
 python src/signing.py

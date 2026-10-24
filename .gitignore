@@ -1,2 +1,8 @@
 .history
 __pycache__
+# Private keys never go to GitHub: only the CA admin holds ca_key.pem,
+# and each user keeps their own <name>_key.pem.
+certs/*_key.pem
+
+# Output of the in-process MITM simulation (not network evidence)
+logs/

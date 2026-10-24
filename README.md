@@ -16,7 +16,7 @@ This repository implements the full end-to-end cryptographic lifecycle:
 - **Phase 2:** Ephemeral Diffie-Hellman key exchange (RFC 3526 Group 14).
 - **Phase 3:** AES-256-GCM authenticated session encryption and Ed25519 digital signatures.
 - **Phase 4:** Certificate Authority (`src/ca.py`), X.509 v3 identity certificates, and 6-step trust chain validation.
-- **Phase 5:** Adversarial MITM testing harness (`tests/mitm_test.py`) and traffic capture (`logs/traffic_capture.log`).
+- **Phase 5:** Live man-in-the-middle proxy (`attacks/mitm_proxy.py`), Wireshark captures (`captures/`), and an automated adversarial test suite (`tests/mitm_test.py`).
 - **Phase 6:** STRIDE threat model (`docs/threat_model.md`), comprehensive final report (`docs/final_report.md`), and Viva Voce preparation.
 
 See `docs/protocol.md` and `docs/final_report.md` for full technical documentation.
@@ -33,6 +33,8 @@ pip install -r requirements.txt
 python src/ca.py init
 ```
 Generates the Root CA certificate (`certs/ca.pem`), Root CA private key (`certs/ca_key.pem`), and issues default certificates for `alice` and `bob`.
+
+Private keys (`certs/*_key.pem`) are git-ignored and must never be committed. Only the CA administrator holds `ca_key.pem`; clients need only `ca.pem` plus their own certificate and key. Clients never sign their own certificates — to add a user, the CA admin runs `python src/ca.py issue <username>`.
 
 Chat is peer-to-peer, not broadcast: you must complete a `/dh` handshake
 with a username before you can `/msg` them, and only that peer receives
@@ -117,7 +119,7 @@ Ctrl+C
 
 Run all 36 unit and integration tests (crypto, signatures, CA validation, trust chain, MITM defenses):
 ```bash
-python -m unittest discover tests -p "*test*.py" -v
+python -m unittest discover -s tests -p "*.py" -v
 ```
 
 ### Run the Adversarial MITM Simulation
@@ -126,7 +128,44 @@ Execute the automated adversarial test suite to simulate an active Man-in-the-Mi
 ```bash
 python tests/mitm_test.py
 ```
-This logs packet frames to `logs/traffic_capture.log` and outputs a complete defense matrix.
+This is an in-process simulation (no real network traffic). It writes simulated frames to `logs/traffic_capture.log` (git-ignored) and prints a defense matrix. For real network evidence, use the live demo below.
+
+### Live MITM demo with Wireshark
+
+`attacks/mitm_proxy.py` is a real attacker ("Mallory") that sits on the network path between the clients and the server:
+
+```text
+alice/bob --> 127.0.0.1:9000 [mitm_proxy.py] --> 127.0.0.1:9001 [server.py]
+```
+
+Wireshark setup (Windows): install Wireshark with **Npcap** and tick "Support loopback traffic capture". Capture on **Adapter for loopback traffic capture** with the display filter `tcp.port == 9000 || tcp.port == 9001`, and use **Follow → TCP Stream** to read the JSON frames.
+
+Use four terminals, all started from the project root.
+
+**Demo A: attack succeeds without certificates**
+
+```bash
+python src/server.py --port 9001                     # terminal 1
+python attacks/mitm_proxy.py --mode swap             # terminal 2 (Mallory)
+python src/client.py --username bob --no-cert        # terminal 3
+python src/client.py --username alice --no-cert      # terminal 4
+```
+
+In Alice's terminal: `/dh bob`, then `/msg bob My bank PIN is 1234`. Mallory prints `*** READ alice -> bob: 'My bank PIN is 1234' ***` while Bob still sees `(signature verified)`. In Wireshark, Alice's `public_key` on the port 9000 stream differs from the one on the port 9001 stream.
+
+**Demo B: attack blocked with certificates**
+
+Repeat with the same commands but without `--no-cert` on either client. After `/dh bob`, Bob prints:
+
+```text
+[security] Rejected DH public value from alice: signing key does not match certificate public key
+```
+
+No session is created and Mallory reads nothing.
+
+**Passive eavesdropping:** run Mallory with `--mode watch`; she sees only ciphertext.
+
+Saved captures go in `captures/` and screenshots in `docs/images/`.
 
 ### Try the crypto standalone
 
@@ -323,8 +362,10 @@ secure_system/
 │   ├── ca.pem
 │   ├── alice.pem
 │   └── bob.pem
-├── logs/
-│   └── traffic_capture.log
+├── attacks/
+│   └── mitm_proxy.py
+├── captures/
+│   └── *.pcapng
 ├── tests/
 │   └── test_security_flow.py
 └── report/

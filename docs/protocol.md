@@ -188,7 +188,7 @@ system under attack from adversary "Mallory":
   - Cert replay with key swap: Blocked (Public key mismatch).
   - Cert tampering: Blocked (Invalid CA signature).
 - **Ciphertext tampering:** Blocked (Invalid signature and GCM tag).
-- Network packet traces recorded in `logs/traffic_capture.log`.
+- Live attack: `attacks/mitm_proxy.py` (swap mode) succeeds against clients run with `--no-cert` and is rejected when certificates are verified. Wireshark captures are in `captures/`.
 
 See `docs/mitm_analysis.md` and `docs/phases/phase-5-mitm-adversarial-test.md`.
 
