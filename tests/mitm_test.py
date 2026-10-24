@@ -12,7 +12,7 @@ Simulates active and passive adversarial attacks against the messaging system:
    - Certificate Replay with Key Substitution
    - Certificate Tampering
 5. In-Transit Message Tampering (Ciphertext & Nonce bit-flipping)
-6. Replay Attack Analysis
+6. Replay Attack (blocked by signed sequence numbers)
 
 Can be run standalone:
     python tests/mitm_test.py
@@ -383,28 +383,46 @@ class MITMTestRunner:
             self.record("Ciphertext Tampering", "Flip 1 bit in ciphertext", "Accepted", "VULNERABLE")
 
     def test_replay_attack(self) -> None:
-        """Scenario 6: Message Replay Attack Analysis."""
-        print("\n--- [Scenario 6] Replay Attack Analysis (Residual Risk) ---")
-        alice_identity = SigningIdentity.generate()
-        session_key = derive_session_key(5555555555)
-        cipher = SessionCipher(session_key)
+        """Scenario 6: Message replay against the real client (sequence-number check)."""
+        print("\n--- [Scenario 6] Replay Attack: Resend a Captured Chat Frame ---")
+        no_certs = os.path.join(tempfile.gettempdir(), "cn_sms_no_certs")
+        with contextlib.redirect_stdout(io.StringIO()):
+            alice = ChatClient("alice", "127.0.0.1", 0, certs_dir=no_certs, require_cert=False)
+            bob = ChatClient("bob", "127.0.0.1", 0, certs_dir=no_certs, require_cert=False)
+            alice.sock = MockWireSocket()
+            bob.sock = MockWireSocket()
+            alice.start_dh_handshake("bob")
+            bob.handle_dh_public(alice.sock.sent[-1])
+            alice.handle_dh_public(bob.sock.sent[-1])
 
-        nonce, ciphertext = cipher.encrypt("Transfer approved", chat_associated_data("alice", "bob"))
-        sig = alice_identity.sign(chat_signed_fields("alice", "bob", nonce, ciphertext))
+        frame = default_protocol.decode(alice.seal_chat("bob", "Transfer approved").rstrip(default_protocol.delimiter))
+        first = bob.open_chat(dict(frame))
+        self.logger.log("alice", "bob", frame, "Original frame (seq=%d) accepted" % frame["seq"])
 
-        # First delivery
-        first_valid = verify(alice_identity.public_key_b64, chat_signed_fields("alice", "bob", nonce, ciphertext), sig)
-        first_pt = cipher.decrypt(nonce, ciphertext, chat_associated_data("alice", "bob"))
+        # Mallory captured the frame and sends the identical bytes again.
+        try:
+            bob.open_chat(dict(frame))
+            replay_accepted = True
+        except MessageRejected as exc:
+            replay_accepted = False
+            reason = str(exc)
+        self.logger.log("mallory", "bob", frame, "Replayed frame")
 
-        # Attacker captures frame and replays 10 seconds later:
-        replay_valid = verify(alice_identity.public_key_b64, chat_signed_fields("alice", "bob", nonce, ciphertext), sig)
-        replay_pt = cipher.decrypt(nonce, ciphertext, chat_associated_data("alice", "bob"))
+        # Bumping seq doesn't help: seq is covered by Alice's signature.
+        bumped = dict(frame, seq=frame["seq"] + 1)
+        try:
+            bob.open_chat(bumped)
+            bump_accepted = True
+        except MessageRejected:
+            bump_accepted = False
 
-        self.logger.log("mallory", "bob", {"type": "chat", "nonce": nonce, "ciphertext": ciphertext, "signature": sig}, "Replayed packet")
-
-        print("[ANALYSIS] Without sequence numbers/timestamps, replayed valid frames verify again.")
-        print("          This defines the explicit protection boundary documented in Phase 6.")
-        self.record("Replay Attack", "Resend captured valid frame", "Accepted (Documented residual risk)", "DOCUMENTED LIMITATION")
+        if first == "Transfer approved" and not replay_accepted and not bump_accepted:
+            print(f"[BLOCKED] Replayed frame rejected: {reason}")
+            print("[BLOCKED] Replay with an edited seq rejected: invalid signature")
+            self.record("Replay Attack", "Resend captured valid frame", "Rejected: seq already seen", "BLOCKED")
+        else:
+            print("[FAIL] Replayed frame was accepted!")
+            self.record("Replay Attack", "Resend captured valid frame", "Accepted", "VULNERABLE")
 
     def print_summary(self) -> None:
         print("\n" + "=" * 90)
@@ -451,6 +469,10 @@ class AdversarialTestSuite(unittest.TestCase):
 
     def test_ciphertext_tampering_blocked(self) -> None:
         self.runner.test_in_transit_ciphertext_tampering()
+        self.assertEqual(self.runner.results[-1][3], "BLOCKED")
+
+    def test_replay_attack_blocked(self) -> None:
+        self.runner.test_replay_attack()
         self.assertEqual(self.runner.results[-1][3], "BLOCKED")
 
 

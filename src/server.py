@@ -23,9 +23,12 @@ class ClientRegistry:
         self._clients: Dict[socket.socket, str] = {}
         self._lock = threading.Lock()
 
-    def register(self, connection: socket.socket, requested_username: str | None) -> str:
+    def register(self, connection: socket.socket, requested_username: str | None) -> str | None:
+        """Register a connection, or return None if that username is already connected."""
         with self._lock:
             username = requested_username or f"user_{len(self._clients) + 1}"
+            if any(name == username and conn is not connection for conn, name in self._clients.items()):
+                return None
             self._clients[connection] = username
         return username
 
@@ -98,6 +101,9 @@ class ChatServer:
 
                     if message_type == "login":
                         username = self.handle_login(connection, address, payload)
+                        if username is None:
+                            should_disconnect = True
+                            break
                     elif message_type == "chat":
                         self.relay(username, payload, "Chat message")
                     elif message_type == "dh_public":
@@ -111,8 +117,18 @@ class ChatServer:
         finally:
             self.disconnect(connection)
 
-    def handle_login(self, connection: socket.socket, address: Tuple[str, int], payload: dict) -> str:
-        username = self.registry.register(connection, payload.get("username"))
+    def handle_login(self, connection: socket.socket, address: Tuple[str, int], payload: dict) -> str | None:
+        requested = payload.get("username")
+        username = self.registry.register(connection, requested)
+        if username is None:
+            # A second "alice" must not take over delivery for the first one.
+            log_message(f"Rejected login from {address}: {requested} is already connected")
+            connection.sendall(default_protocol.encode({
+                "type": "system",
+                "sender": "server",
+                "message": f"Username '{requested}' is already connected. Disconnecting."
+            }))
+            return None
         log_message(f"New client connected: {username} from {address}")
 
         welcome = default_protocol.encode({
@@ -124,9 +140,20 @@ class ChatServer:
         return username
 
     def relay(self, username: str | None, payload: dict, label: str) -> None:
-        """Forward a peer-targeted payload to its target, unchanged."""
-        sender = payload.get("sender") or username or "anonymous"
+        """Forward a peer-targeted payload to its target, unchanged.
+
+        The frame's sender must be the name this connection logged in with,
+        so one client can't route frames under another client's name.
+        """
+        sender = payload.get("sender")
         target = payload.get("target")
+
+        if username is None:
+            log_message(f"{label} dropped: connection has not logged in")
+            return
+        if sender != username:
+            log_message(f"{label} dropped: '{username}' tried to send as '{sender}'")
+            return
 
         if payload.get("type") == "chat":
             # The server only ever sees ciphertext; logging it shows what an

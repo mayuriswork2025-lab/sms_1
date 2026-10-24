@@ -101,26 +101,42 @@ explanation.
 sender's Ed25519 public key (`signing_key`) and a `signature` over
 `{type, sender, target, public_key, signing_key}`. The receiver verifies
 that signature before using the DH value, and rejects the message if it
-fails or if `target` isn't its own username. On success it stores
-`signing_key` as that peer's identity key for later chat messages.
+fails or if `target` isn't its own username, and it rejects any DH value
+outside `[2, P-2]` (such values would force a predictable shared secret).
+On success it stores `signing_key` as that peer's identity key for later
+chat messages.
+
+**Server-side checks.** The relay refuses a second login under a username
+that is already connected, and drops any frame whose `sender` differs from
+the name the sending connection logged in with.
 
 **Sending a chat message** (`ChatClient.seal_chat`):
 
 1. Encrypt the text with AES-256-GCM under the peer's session key, with a
    fresh random 12-byte nonce. Associated data is `chat|<sender>|<target>`,
    so the ciphertext only decrypts for that exact sender and target pair.
-2. Sign `{type, sender, target, nonce, ciphertext}` with the sender's
+2. Increment the per-peer counter and attach it as `seq` (1, 2, 3, ...).
+   The counter resets to 0 whenever a new DH session with that peer starts.
+3. Sign `{type, sender, target, seq, nonce, ciphertext}` with the sender's
    Ed25519 private key (encrypt-then-sign).
-3. Send `nonce`, `ciphertext` and `signature` base64-encoded. No plaintext
-   goes on the wire.
+4. Send `seq`, `nonce`, `ciphertext` and `signature`, with the binary values
+   base64-encoded. No plaintext goes on the wire.
+
+```json
+{"type": "chat", "sender": "alice", "target": "bob", "seq": 1,
+ "nonce": "<base64>", "ciphertext": "<base64>", "signature": "<base64>"}
+```
 
 **Receiving a chat message** (`ChatClient.open_chat`), in this order:
 
 1. `target` must be our own username.
 2. We must hold a session key and a signing key for `sender`.
-3. The signature must verify under `sender`'s stored signing key.
-4. GCM decryption must succeed. This also re-checks integrity and the
-   sender/target binding.
+3. `seq` must be present and be an integer.
+4. The signature must verify under `sender`'s stored signing key.
+5. `seq` must be higher than the last one accepted from `sender` in this
+   session. Otherwise the frame is a replay and is rejected.
+6. GCM decryption must succeed. This also re-checks integrity and the
+   sender/target binding. Only then is `seq` recorded as accepted.
 
 If any step fails, the message is dropped and the client prints
 `[security] Rejected message from <sender>: <reason>`. The text is never
@@ -197,6 +213,6 @@ See `docs/mitm_analysis.md` and `docs/phases/phase-5-mitm-adversarial-test.md`.
 See `docs/threat_model.md` and `docs/final_report.md` for full STRIDE analysis.
 
 **Documented Residual Risks:**
-- **Replay attacks:** Packets do not currently track sliding-window sequence numbers.
+- **Replay attacks:** Mitigated. Chat frames carry a signed per-session `seq`; the receiver rejects any `seq` it has already accepted.
 - **Metadata visibility:** Relay server observes `sender` and `target` to route packets.
 - **Endpoint compromise:** Private keys stored on disk in PEM format.

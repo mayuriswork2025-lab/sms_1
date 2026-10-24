@@ -12,11 +12,19 @@ def build_login_message(username: str) -> bytes:
     return default_protocol.encode(payload)
 
 
-def build_chat_message(sender: str, target: str, nonce: str, ciphertext: str, signature: str) -> bytes:
+def build_chat_message(
+    sender: str,
+    target: str,
+    nonce: str,
+    ciphertext: str,
+    signature: str,
+    seq: int = 0,
+) -> bytes:
     payload = {
         "type": "chat",
         "sender": sender,
         "target": target,
+        "seq": seq,
         "nonce": nonce,
         "ciphertext": ciphertext,
         "signature": signature,
@@ -45,9 +53,14 @@ def build_dh_public_message(
     return default_protocol.encode(payload)
 
 
-def chat_signed_fields(sender: str, target: str, nonce: str, ciphertext: str) -> dict:
-    """The chat fields covered by the sender's signature (everything except the signature)."""
-    return {"type": "chat", "sender": sender, "target": target, "nonce": nonce, "ciphertext": ciphertext}
+def chat_signed_fields(sender: str, target: str, nonce: str, ciphertext: str, seq: int = 0) -> dict:
+    """The chat fields covered by the sender's signature (everything except the signature).
+
+    seq is a per-session message counter. Because it is signed, an attacker
+    can't change it, and the receiver rejects any seq it has already seen,
+    so a captured frame can't be replayed.
+    """
+    return {"type": "chat", "sender": sender, "target": target, "seq": seq, "nonce": nonce, "ciphertext": ciphertext}
 
 
 def dh_public_signed_fields(

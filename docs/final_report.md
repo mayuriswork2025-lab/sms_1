@@ -140,7 +140,7 @@ Active MITM (Phase 4)            | Mallory cert claiming Alice  | Rejected: Iden
 Active MITM (Phase 4)            | Replay Alice cert with Mallory| Binding check fail| BLOCKED   
 Active MITM (Phase 4)            | Modify bytes in certificate  | Signature invalid | BLOCKED   
 Ciphertext Tampering             | Flip 1 bit in ciphertext     | Rejected by Tag   | BLOCKED   
-Replay Attack                    | Resend captured valid frame  | Accepted (Doc)    | DOCUMENTED
+Replay Attack                    | Resend captured valid frame  | Seq already seen  | BLOCKED
 ==========================================================================================
 ```
 
@@ -160,7 +160,7 @@ Replay Attack                    | Resend captured valid frame  | Accepted (Doc)
 - **Relay Re-targeting:** Associated Authenticated Data (AAD) prevents a rogue relay from delivering Alice's message for Bob to Carol.
 
 ### Documented Residual Risks:
-1. **Replay Attacks:** The current wire format does not enforce sliding-window sequence numbers or strict UTC timestamps. Replaying a captured frame within the same session will decrypt again.
+1. **Replay Attacks (mitigated):** Chat frames now carry a signed per-session sequence number, and the receiver rejects any number it has already accepted. This was a residual risk in the first design and is now closed; see `docs/threat_model.md` section 6.1.
 2. **Endpoint Compromise:** If an attacker gains root access to the client device, they can read private keys from process memory or unencrypted PEM files on disk.
 3. **Metadata Leakage:** The relay server must observe `sender` and `target` to route packets. Traffic analysis can reveal communication frequency and contact networks.
 
@@ -238,7 +238,7 @@ CN_SMS/
 # 1. Initialize CA and certificates
 python src/ca.py init
 
-# 2. Run all unit and integration tests (36 tests)
+# 2. Run all unit and integration tests (50 tests)
 python -m unittest discover -s tests -p "*.py" -v
 
 # 3. Run the live MITM demo (see README: Live MITM demo with Wireshark)

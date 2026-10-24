@@ -7,10 +7,12 @@ Sits between the clients and the real server:
     alice/bob --> 127.0.0.1:9000 [this proxy] --> 127.0.0.1:9001 [server.py]
 
 Modes:
-    watch - forward everything unchanged and print what an eavesdropper sees
-    swap  - replace every DH public value with Mallory's own and re-sign it
-            with Mallory's key, then decrypt, print and re-encrypt every chat
-            message passing through
+    watch  - forward everything unchanged and print what an eavesdropper sees
+    swap   - replace every DH public value with Mallory's own and re-sign it
+             with Mallory's key, then decrypt, print and re-encrypt every chat
+             message passing through
+    replay - forward everything unchanged, then resend each captured chat
+             frame a second time (the receiver should reject the copy)
 
 Expected results:
     clients started with --no-cert  -> swap succeeds, Mallory reads messages
@@ -39,6 +41,7 @@ from src.signing import SigningIdentity
 
 RECV_BUFFER_SIZE = 4096
 PREVIEW_CHARS = 32
+REPLAY_DELAY_SECONDS = 2.0
 
 
 class Mallory:
@@ -113,8 +116,23 @@ class Mallory:
         nonce, ciphertext = SessionCipher(key_out).encrypt(text, aad)
         payload["nonce"] = nonce
         payload["ciphertext"] = ciphertext
-        payload["signature"] = self.identity.sign(chat_signed_fields(sender, target, nonce, ciphertext))
+        payload["signature"] = self.identity.sign(
+            chat_signed_fields(sender, target, nonce, ciphertext, payload.get("seq", 0))
+        )
         return payload
+
+
+def schedule_replay(dest: socket.socket, frame: bytes, payload: dict) -> None:
+    """Resend an already-delivered chat frame unchanged after a short delay."""
+
+    def resend() -> None:
+        print(f"[mallory] REPLAYING captured chat {payload.get('sender')} -> {payload.get('target')} (seq {payload.get('seq')})")
+        try:
+            dest.sendall(frame)
+        except OSError:
+            pass
+
+    threading.Timer(REPLAY_DELAY_SECONDS, resend).start()
 
 
 def pipe(source: socket.socket, dest: socket.socket, mallory: Optional[Mallory]) -> None:
@@ -139,7 +157,10 @@ def pipe(source: socket.socket, dest: socket.socket, mallory: Optional[Mallory])
                 except ProtocolDecodeError:
                     dest.sendall(frame + default_protocol.delimiter)
                     continue
-                dest.sendall(default_protocol.encode(mallory.intercept(payload)))
+                frame_out = default_protocol.encode(mallory.intercept(payload))
+                dest.sendall(frame_out)
+                if mallory.mode == "replay" and payload.get("type") == "chat":
+                    schedule_replay(dest, frame_out, payload)
     except OSError:
         pass
     finally:
@@ -152,7 +173,7 @@ def pipe(source: socket.socket, dest: socket.socket, mallory: Optional[Mallory])
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Mallory man-in-the-middle proxy")
-    parser.add_argument("--mode", choices=["watch", "swap"], default="watch", help="watch = eavesdrop only, swap = DH key substitution")
+    parser.add_argument("--mode", choices=["watch", "swap", "replay"], default="watch", help="watch = eavesdrop only, swap = DH key substitution, replay = resend captured chat frames")
     parser.add_argument("--listen-port", type=int, default=9000, help="Port the clients connect to")
     parser.add_argument("--server-port", type=int, default=9001, help="Port the real server listens on")
     args = parser.parse_args()

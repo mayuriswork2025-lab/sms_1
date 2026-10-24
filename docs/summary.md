@@ -52,7 +52,7 @@ Attack Scenario                  | Attacker Goal                | Defense Result
 6. Cert Replay with Key Swap     | Replay cert with rogue key   | BLOCKED (Public key mismatch)
 7. Certificate Tampering         | Alter cert attributes        | BLOCKED (CA signature invalid)
 8. Ciphertext Tampering          | Flip bits in transmission    | BLOCKED (Ed25519 sig + GCM tag)
-9. Message Replay Attack         | Resend captured frame        | DOCUMENTED RESIDUAL LIMITATION
+9. Message Replay Attack         | Resend captured frame        | BLOCKED (signed sequence numbers)
 ==========================================================================================
 ```
 
@@ -63,7 +63,7 @@ Attack Scenario                  | Attacker Goal                | Defense Result
 1. **Why DH alone fails:** Diffie-Hellman provides confidentiality against passive listeners, but cannot distinguish between a peer and an active man-in-the-middle.
 2. **Why Signatures alone fail:** Digital signatures prove possession of *a* private key, but without identity binding, an attacker can substitute their own key during the handshake.
 3. **Why the CA succeeds:** The Certificate Authority establishes an out-of-band **Root of Trust**. A peer only accepts public keys signed by the Root CA matching the claimed Common Name.
-4. **Honest Protection Boundary:** The system protects content, integrity, and authenticity, but acknowledges residual risks: traffic metadata is visible to the relay, replayed messages without sequence counters will verify within the same session, and compromised client endpoints expose stored private keys.
+4. **Honest Protection Boundary:** The system protects content, integrity, and authenticity, but acknowledges residual risks: traffic metadata is visible to the relay, replays are now blocked by signed sequence numbers, and compromised client endpoints expose stored private keys.
 
 ---
 
@@ -73,7 +73,7 @@ Attack Scenario                  | Attacker Goal                | Defense Result
 # Initialize CA and default certificates
 python src/ca.py init
 
-# Run all 36 unit and integration tests
+# Run all 50 unit and integration tests
 python -m unittest discover -s tests -p "*.py" -v
 
 # Run the adversarial MITM test simulation

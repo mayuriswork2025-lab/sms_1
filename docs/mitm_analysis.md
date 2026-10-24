@@ -112,11 +112,11 @@ We subjected Phase 4 to four distinct adversarial vectors:
 
 ---
 
-### Scenario 6: Replay Attack Analysis (Protection Boundary)
-- **Adversary Action:** Mallory captures a valid, signed encrypted frame from Alice to Bob (`"Transfer approved"`) and re-injects it onto the network 60 seconds later.
-- **Observation:** Bob's client verifies the signature (it was validly signed by Alice) and decrypts the message again with the active session key.
-- **Protection Boundary Analysis:** Without explicit monotonically increasing sequence numbers or timestamps inside the authenticated payload, replayed messages cannot be distinguished from newly sent messages within the lifetime of the same session key.
-- **Residual Risk:** Documented as an acknowledged residual limitation in `docs/threat_model.md`.
+### Scenario 6: Replay Attack (blocked by signed sequence numbers)
+- **Adversary Action:** Mallory captures a valid, signed encrypted frame from Alice to Bob (`"Transfer approved"`) and re-injects it later.
+- **Defense:** Each chat frame carries a per-session sequence number `seq` inside the signed fields. Bob rejects any `seq` he has already accepted: `Rejected message from alice: replayed message (seq 1, already accepted up to 1)`.
+- **Bypass attempt:** Changing `seq` to a new value invalidates Alice's signature, so the edited frame is rejected too.
+- **Live test:** `python attacks/mitm_proxy.py --mode replay` resends every chat frame 2 seconds after the original. Bob accepts the original and rejects the copy.
 
 ---
 
@@ -131,7 +131,7 @@ We subjected Phase 4 to four distinct adversarial vectors:
 | **Identity Mismatch** | Spoof sender username | **VULNERABLE** | **VULNERABLE** | **PREVENTED** |
 | **Payload Tampering** | Alter message content | **VULNERABLE** | Prevented | **PREVENTED** |
 | **Certificate Tampering** | Modify cert attributes | N/A | N/A | **PREVENTED** |
-| **Message Replay** | Re-execute prior message | Vulnerable | Vulnerable | **Documented Limitation** |
+| **Message Replay** | Re-execute prior message | Vulnerable | Vulnerable | **PREVENTED** (signed sequence numbers) |
 
 ---
 
@@ -189,6 +189,7 @@ Why it fails: Mallory can forward Alice's genuine certificate, but that certific
 | A | on | Passive sniffing | Only ciphertext visible |
 | B | off (`--no-cert`) | DH key substitution | **Succeeds**: Mallory reads every message |
 | C | on | DH key substitution | **Blocked**: handshake rejected, no session |
+| D | on | Replay a captured chat frame (`--mode replay`) | **Blocked**: copy rejected as a replay |
 
 ---
 
@@ -197,7 +198,7 @@ Why it fails: Mallory can forward Alice's genuine certificate, but that certific
 Live attack (four terminals, from the project root):
 ```bash
 python src/server.py --port 9001
-python attacks/mitm_proxy.py --mode swap      # or --mode watch
+python attacks/mitm_proxy.py --mode swap      # or --mode watch / --mode replay
 python src/client.py --username bob [--no-cert]
 python src/client.py --username alice [--no-cert]
 ```

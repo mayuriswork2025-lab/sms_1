@@ -42,6 +42,16 @@ def compute_public_key(private_key: int) -> int:
     return pow(G, private_key, P)
 
 
+def validate_public_key(public_key: int) -> None:
+    """Reject peer values that would force a predictable shared secret.
+
+    0 and P give a secret of 0, 1 gives 1, and P-1 gives 1 or P-1 (it has
+    order 2). A genuine g^x mod p always lies in [2, P-2].
+    """
+    if not 2 <= public_key <= P - 2:
+        raise ValueError("DH public value out of range [2, P-2]")
+
+
 def compute_shared_secret(private_key: int, peer_public_key: int) -> int:
     """peer_public_key^private_key mod p -- equal on both sides."""
     return pow(peer_public_key, private_key, P)

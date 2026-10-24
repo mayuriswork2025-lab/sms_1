@@ -93,10 +93,16 @@ The security guarantees of this system hold under the following standard assumpt
 
 A vital requirement of BACSE203 Project 12 is an honest, rigorous analysis of the **protection boundary** — acknowledging what the architecture does **not** protect against:
 
-### 6.1 Replay Attacks (Within an Active Session)
-- **Vulnerability:** Chat messages contain `{type, sender, target, nonce, ciphertext, signature}`. While `nonce` is randomized per message, the client does not maintain a sliding window of observed nonces, timestamps, or sequential message counter.
-- **Impact:** An attacker who captures a validly signed message (e.g., `"Approve transaction"`) can replay the identical packet within the same session. Bob's client will decrypt it a second time.
-- **Mitigation for Production:** Add a monotonically increasing sequence counter or UTC timestamp into `chat_signed_fields`, rejecting out-of-order or expired messages.
+### 6.1 Replay Attacks (now mitigated)
+- **Earlier vulnerability:** Chat messages carried only `{type, sender, target, nonce, ciphertext, signature}`. A captured, validly signed frame could be resent within the same session and Bob would decrypt it again.
+- **Mitigation implemented:** Every chat frame now carries a per-session sequence number `seq`, covered by the sender's Ed25519 signature. The receiver remembers the highest `seq` accepted from each peer and rejects any frame with `seq` no higher than that. Editing `seq` to get past the check breaks the signature. Both counters reset when a new DH session starts, and an old frame can't be replayed into the new session because it was encrypted under the old key.
+- **Verified by:** `tests/test_encryption_and_signing.py` (replay, edited seq, out-of-order, missing seq), Scenario 6 of `tests/mitm_test.py`, and the live attack `python attacks/mitm_proxy.py --mode replay`.
+- **Remaining limitation:** Strict ordering means a frame delayed behind a newer one is dropped. TCP delivers in order, so this doesn't occur in normal use.
+
+### 6.1b Handshake and Relay Hardening
+- DH public values outside `[2, P-2]` are rejected (values like 1 or P-1 would force a predictable shared secret).
+- The server refuses a second login under a name that is already connected, so a duplicate "alice" can't take over her deliveries.
+- The server drops any frame whose `sender` differs from the name that connection logged in with.
 
 ### 6.2 Metadata & Traffic Analysis
 - **Vulnerability:** End-to-end encryption protects message *content*, but message *headers* (`type`, `sender`, `target`) must be read by the server to route packets.

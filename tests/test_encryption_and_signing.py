@@ -132,9 +132,34 @@ class EndToEndTests(unittest.TestCase):
         # Mallory has her own valid key pair but claims to be Alice.
         mallory = SigningIdentity.generate()
         payload = self.alice_sends("hello bob")
-        fields = {k: payload[k] for k in ("type", "sender", "target", "nonce", "ciphertext")}
+        fields = {k: payload[k] for k in ("type", "sender", "target", "seq", "nonce", "ciphertext")}
         payload["signature"] = mallory.sign(fields)
         with self.assertRaisesRegex(MessageRejected, "invalid signature"):
+            self.bob.open_chat(payload)
+
+    def test_replayed_message_is_rejected(self) -> None:
+        payload = self.alice_sends("hello bob")
+        self.assertEqual(self.bob.open_chat(dict(payload)), "hello bob")
+        with self.assertRaisesRegex(MessageRejected, "replayed message"):
+            self.bob.open_chat(dict(payload))
+
+    def test_replay_with_edited_seq_fails_signature_check(self) -> None:
+        payload = self.alice_sends("hello bob")
+        self.bob.open_chat(dict(payload))
+        with self.assertRaisesRegex(MessageRejected, "invalid signature"):
+            self.bob.open_chat(dict(payload, seq=payload["seq"] + 1))
+
+    def test_older_message_is_rejected_after_newer_one(self) -> None:
+        first = self.alice_sends("one")
+        second = self.alice_sends("two")
+        self.assertEqual(self.bob.open_chat(second), "two")
+        with self.assertRaisesRegex(MessageRejected, "replayed message"):
+            self.bob.open_chat(first)
+
+    def test_message_without_seq_is_rejected(self) -> None:
+        payload = self.alice_sends("hello bob")
+        del payload["seq"]
+        with self.assertRaisesRegex(MessageRejected, "missing sequence number"):
             self.bob.open_chat(payload)
 
     def test_message_from_unknown_peer_is_rejected(self) -> None:

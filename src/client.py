@@ -8,7 +8,13 @@ from typing import Dict
 try:
     from src.ca import CertificateAuthority
     from src.crypto import DecryptionError, SessionCipher, chat_associated_data
-    from src.dh import compute_public_key, compute_shared_secret, derive_session_key, generate_private_key
+    from src.dh import (
+        compute_public_key,
+        compute_shared_secret,
+        derive_session_key,
+        generate_private_key,
+        validate_public_key,
+    )
     from src.message_format import (
         build_chat_message,
         build_dh_public_message,
@@ -21,7 +27,13 @@ try:
 except ImportError:
     from ca import CertificateAuthority
     from crypto import DecryptionError, SessionCipher, chat_associated_data
-    from dh import compute_public_key, compute_shared_secret, derive_session_key, generate_private_key
+    from dh import (
+        compute_public_key,
+        compute_shared_secret,
+        derive_session_key,
+        generate_private_key,
+        validate_public_key,
+    )
     from message_format import (
         build_chat_message,
         build_dh_public_message,
@@ -46,6 +58,9 @@ class DHSessionState:
         # Each peer's Ed25519 public key (base64), learned during the DH handshake.
         self.peer_signing_keys: Dict[str, str] = {}
         self.peer_certificates: Dict[str, str] = {}
+        # Replay protection: last seq sent to / accepted from each peer this session.
+        self.send_seq: Dict[str, int] = {}
+        self.last_seen_seq: Dict[str, int] = {}
 
 
 class MessageRejected(Exception):
@@ -159,23 +174,27 @@ class ChatClient:
         print(f"[you -> {peer}] {body}")
 
     def seal_chat(self, peer: str, text: str) -> bytes:
-        """Encrypt text for peer with the session key, then sign the ciphertext."""
+        """Encrypt text for peer with the session key, then sign the ciphertext and sequence number."""
         with self.state.lock:
             session_key = self.state.session_keys[peer]
+            seq = self.state.send_seq.get(peer, 0) + 1
+            self.state.send_seq[peer] = seq
         cipher = SessionCipher(session_key)
         nonce, ciphertext = cipher.encrypt(text, chat_associated_data(self.username, peer))
-        signature = self.identity.sign(chat_signed_fields(self.username, peer, nonce, ciphertext))
-        return build_chat_message(self.username, peer, nonce, ciphertext, signature)
+        signature = self.identity.sign(chat_signed_fields(self.username, peer, nonce, ciphertext, seq))
+        return build_chat_message(self.username, peer, nonce, ciphertext, signature, seq)
 
     def open_chat(self, payload: dict) -> str:
-        """Verify an incoming chat message's signature, then decrypt it.
+        """Verify an incoming chat message's signature and sequence number, then decrypt it.
 
         The signature is checked first so that nothing from an unauthenticated
-        sender ever reaches the decryption step. Raises MessageRejected if any
-        check fails.
+        sender ever reaches the decryption step. A seq no higher than the last
+        one accepted from this sender is a replay and is rejected. Raises
+        MessageRejected if any check fails.
         """
         sender = payload.get("sender")
         target = payload.get("target")
+        seq = payload.get("seq")
         nonce = payload.get("nonce")
         ciphertext = payload.get("ciphertext")
         signature = payload.get("signature")
@@ -184,6 +203,8 @@ class ChatClient:
             raise MessageRejected(f"addressed to {target}, not us")
         if not (nonce and ciphertext and signature):
             raise MessageRejected("missing nonce, ciphertext, or signature")
+        if not isinstance(seq, int) or isinstance(seq, bool):
+            raise MessageRejected("missing sequence number")
 
         with self.state.lock:
             session_key = self.state.session_keys.get(sender)
@@ -191,13 +212,22 @@ class ChatClient:
         if session_key is None or signing_key is None:
             raise MessageRejected(f"no session with {sender}")
 
-        if not verify(signing_key, chat_signed_fields(sender, target, nonce, ciphertext), signature):
+        if not verify(signing_key, chat_signed_fields(sender, target, nonce, ciphertext, seq), signature):
             raise MessageRejected("invalid signature")
 
+        with self.state.lock:
+            last_seen = self.state.last_seen_seq.get(sender, 0)
+            if seq <= last_seen:
+                raise MessageRejected(f"replayed message (seq {seq}, already accepted up to {last_seen})")
+
         try:
-            return SessionCipher(session_key).decrypt(nonce, ciphertext, chat_associated_data(sender, target))
+            plaintext = SessionCipher(session_key).decrypt(nonce, ciphertext, chat_associated_data(sender, target))
         except DecryptionError as exc:
             raise MessageRejected("decryption failed") from exc
+
+        with self.state.lock:
+            self.state.last_seen_seq[sender] = max(seq, self.state.last_seen_seq.get(sender, 0))
+        return plaintext
 
     def receive_messages(self) -> None:
         # TCP is a byte stream, not a message stream: one recv() can return part
@@ -289,13 +319,21 @@ class ChatClient:
         if not verify(signing_key, signed_fields, payload.get("signature", "")):
             print(f"[security] Rejected DH public value from {sender}: invalid signature")
             return
-        peer_public_key = int(public_key_raw)
+        try:
+            peer_public_key = int(public_key_raw)
+            validate_public_key(peer_public_key)
+        except ValueError:
+            print(f"[security] Rejected DH public value from {sender}: value out of range (would force a weak key)")
+            return
 
         with self.state.lock:
             self.state.peer_signing_keys[sender] = signing_key
             if certificate:
                 self.state.peer_certificates[sender] = certificate
             pending_private_key = self.state.pending_private_keys.pop(sender, None)
+            # A new session starts counting from zero in both directions.
+            self.state.send_seq[sender] = 0
+            self.state.last_seen_seq[sender] = 0
 
             if pending_private_key is not None:
                 # We initiated this handshake; this is the peer's reply.

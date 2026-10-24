@@ -117,7 +117,7 @@ Ctrl+C
 
 ### Run the tests
 
-Run all 36 unit and integration tests (crypto, signatures, CA validation, trust chain, MITM defenses):
+Run all 50 unit and integration tests (crypto, signatures, CA validation, trust chain, replay protection, handshake hardening, MITM defenses):
 ```bash
 python -m unittest discover -s tests -p "*.py" -v
 ```
@@ -164,6 +164,8 @@ Repeat with the same commands but without `--no-cert` on either client. After `/
 No session is created and Mallory reads nothing.
 
 **Passive eavesdropping:** run Mallory with `--mode watch`; she sees only ciphertext.
+
+**Replay attack:** run Mallory with `--mode replay` (certificates on). She resends each chat message 2 seconds later. Bob accepts the original and prints `[security] Rejected message from alice: replayed message (seq 1, already accepted up to 1)` for the copy.
 
 Saved captures go in `captures/` and screenshots in `docs/images/`.
 
