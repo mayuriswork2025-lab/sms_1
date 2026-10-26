@@ -11,8 +11,10 @@ guarantee rests on the discrete-log problem being hard, not on the
 prime being secret.
 """
 
-import hashlib
 import secrets
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 # RFC 3526, 2048-bit MODP Group 14.
 P = int(
@@ -57,16 +59,21 @@ def compute_shared_secret(private_key: int, peer_public_key: int) -> int:
     return pow(peer_public_key, private_key, P)
 
 
+SESSION_KEY_INFO = b"BACSE203 secure messaging AES-256-GCM session key"
+
+
 def derive_session_key(shared_secret: int) -> bytes:
-    """Hash the raw shared secret down to a fixed-size symmetric key.
+    """Turn the raw shared secret into a 32-byte AES-256 key with HKDF-SHA256.
 
     The raw DH output shouldn't be used directly as a cipher key (it's
     not uniformly distributed over all byte strings the way a good key
-    should be); hashing it is the standard fix and gives phase 3 a
-    ready-made AES-256 key.
+    should be). HKDF (RFC 5869) is the standard key-derivation function
+    for this: it extracts the secret's entropy and expands it into a key,
+    and the `info` label ties the key to this one purpose. The secret is
+    encoded at the full width of P so both sides always hash the same bytes.
     """
-    secret_bytes = shared_secret.to_bytes((shared_secret.bit_length() + 7) // 8, "big")
-    return hashlib.sha256(secret_bytes).digest()
+    secret_bytes = shared_secret.to_bytes((P.bit_length() + 7) // 8, "big")
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=SESSION_KEY_INFO).derive(secret_bytes)
 
 
 if __name__ == "__main__":

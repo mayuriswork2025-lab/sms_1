@@ -19,7 +19,7 @@ This repository implements the full end-to-end cryptographic lifecycle:
 - **Phase 5:** Live man-in-the-middle proxy (`attacks/mitm_proxy.py`), Wireshark captures (`captures/`), and an automated adversarial test suite (`tests/mitm_test.py`).
 - **Phase 6:** STRIDE threat model (`docs/threat_model.md`), comprehensive final report (`docs/final_report.md`), and Viva Voce preparation.
 
-See `docs/protocol.md` and `docs/final_report.md` for full technical documentation.
+See `docs/protocol.md` and `docs/final_report.md` for full technical documentation, and `docs/demo_guide.md` for the step-by-step demo script.
 
 ### Install dependencies
 
@@ -33,6 +33,8 @@ pip install -r requirements.txt
 python src/ca.py init
 ```
 Generates the Root CA certificate (`certs/ca.pem`), Root CA private key (`certs/ca_key.pem`), and issues default certificates for `alice` and `bob`.
+
+On a fresh clone the private keys aren't there (they're git-ignored), so `init` creates a new Root CA of your own and reissues `alice` and `bob` under it. Git will then show `certs/ca.pem`, `certs/alice.pem` and `certs/bob.pem` as modified. That's expected; don't commit them. Where the keys already exist, `init` leaves everything unchanged.
 
 Private keys (`certs/*_key.pem`) are git-ignored and must never be committed. Only the CA administrator holds `ca_key.pem`; clients need only `ca.pem` plus their own certificate and key. Clients never sign their own certificates — to add a user, the CA admin runs `python src/ca.py issue <username>`.
 

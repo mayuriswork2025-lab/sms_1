@@ -12,8 +12,11 @@ import contextlib
 import io
 import json
 import os
+import shutil
+import tempfile
 import unittest
 
+from src.ca import initialize_default_environment
 from src.client import ChatClient, MessageRejected
 from src.crypto import DecryptionError, SessionCipher, b64decode, b64encode, chat_associated_data
 from src.protocol import default_protocol
@@ -92,8 +95,13 @@ class EndToEndTests(unittest.TestCase):
     """Alice and Bob complete a signed DH handshake, then exchange a chat message."""
 
     def setUp(self) -> None:
-        self.alice = ChatClient("alice", "127.0.0.1", 0)
-        self.bob = ChatClient("bob", "127.0.0.1", 0)
+        # A throwaway CA and keys, so the tests don't depend on the
+        # git-ignored private keys in certs/ (absent on a fresh clone).
+        self.certs_dir = tempfile.mkdtemp()
+        with contextlib.redirect_stdout(io.StringIO()):
+            initialize_default_environment(self.certs_dir)
+            self.alice = ChatClient("alice", "127.0.0.1", 0, certs_dir=self.certs_dir)
+            self.bob = ChatClient("bob", "127.0.0.1", 0, certs_dir=self.certs_dir)
         self.alice.sock = RecordingSocket()
         self.bob.sock = RecordingSocket()
 
@@ -101,6 +109,9 @@ class EndToEndTests(unittest.TestCase):
             self.alice.start_dh_handshake("bob")
             self.bob.handle_dh_public(self.alice.sock.sent[-1])
             self.alice.handle_dh_public(self.bob.sock.sent[-1])
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.certs_dir, ignore_errors=True)
 
     def alice_sends(self, text: str) -> dict:
         return default_protocol.decode(self.alice.seal_chat("bob", text).rstrip(default_protocol.delimiter))
@@ -168,7 +179,8 @@ class EndToEndTests(unittest.TestCase):
             self.bob.open_chat(payload)
 
     def test_tampered_dh_public_value_is_rejected(self) -> None:
-        carol = ChatClient("carol", "127.0.0.1", 0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            carol = ChatClient("carol", "127.0.0.1", 0, certs_dir=self.certs_dir)
         carol.sock = RecordingSocket()
         with contextlib.redirect_stdout(io.StringIO()):
             self.alice.start_dh_handshake("carol")

@@ -25,7 +25,7 @@ The objective of **Project 12** is to build a complete, production-grade secure 
 | Milestone | Target Months | Scope & Deliverables | Status |
 |---|---|---|---|
 | **#45** | Months 1–2 | Plaintext messaging skeleton; framing protocol (`\n`-delimited JSON); TCP server/client relay. | **COMPLETED** |
-| **#46** | Months 2–3 | Diffie-Hellman (RFC 3526 Group 14); session key derivation (SHA-256); AES-256-GCM encryption; Ed25519 digital signatures. | **COMPLETED** |
+| **#46** | Months 2–3 | Diffie-Hellman (RFC 3526 Group 14); session key derivation (HKDF-SHA256); AES-256-GCM encryption; Ed25519 digital signatures. | **COMPLETED** |
 | **#47** | Months 3–4 | Certificate Authority workflow (`src/ca.py`); X.509 v3 certificate issuance; 6-step trust chain validation; CRL revocation tracking. | **COMPLETED** |
 | **#48** | Months 5–6 | Live MITM proxy (`attacks/mitm_proxy.py`) with Wireshark captures (`captures/`); automated adversarial test suite (`tests/mitm_test.py`); STRIDE threat model; final report and viva preparation. | **COMPLETED** |
 
@@ -77,7 +77,7 @@ The objective of **Project 12** is to build a complete, production-grade secure 
                | Alice verifies Bob's cert & signature           |
                | Alice derives: s = B^a mod p                    |
                |                                                 |
-               | Both compute: SessionKey = SHA-256(s)           |
+               | Both compute: SessionKey = HKDF-SHA256(s)       |
                |                                                 |
                | PHASE 3: AES-256-GCM ENCRYPTED CHAT             |
                | ===================================             |
@@ -100,8 +100,8 @@ The objective of **Project 12** is to build a complete, production-grade secure 
 - **Shared Secret Computation:**
   $$s = (\text{peer\_public\_key})^{\text{private\_key}} \pmod p$$
 - **Session Key Derivation:**
-  $$\text{SessionKey} = \text{SHA-256}(\text{bytes}(s))$$
-  Produces a uniformly distributed 32-byte (256-bit) symmetric key.
+  $$\text{SessionKey} = \text{HKDF-SHA256}(\text{bytes}(s),\ \text{info}=\text{\"BACSE203 \ldots session key\"})$$
+  HKDF (RFC 5869) extracts the entropy of $s$ and expands it into a uniformly distributed 32-byte (256-bit) AES key. The `info` label binds the key to this one purpose.
 
 ### 4.2 Symmetric Session Cipher (`src/crypto.py`)
 - **Algorithm:** AES-256 in Galois/Counter Mode (GCM).
@@ -163,6 +163,8 @@ Replay Attack                    | Resend captured valid frame  | Seq already se
 1. **Replay Attacks (mitigated):** Chat frames now carry a signed per-session sequence number, and the receiver rejects any number it has already accepted. This was a residual risk in the first design and is now closed; see `docs/threat_model.md` section 6.1.
 2. **Endpoint Compromise:** If an attacker gains root access to the client device, they can read private keys from process memory or unencrypted PEM files on disk.
 3. **Metadata Leakage:** The relay server must observe `sender` and `target` to route packets. Traffic analysis can reveal communication frequency and contact networks.
+4. **CA generates user keys:** `python src/ca.py issue <user>` creates the user's private key as well as the certificate. A production CA would only sign a public key the user generated and submitted (a certificate signing request), so the CA never sees user private keys.
+5. **Single-level trust chain:** Certificates are signed directly by the Root CA. There is no intermediate CA, so the Root CA key must be used for every issuance instead of being kept offline.
 
 ---
 

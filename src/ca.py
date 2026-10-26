@@ -315,20 +315,26 @@ def initialize_default_environment(certs_dir: str = DEFAULT_CERTS_DIR) -> Certif
     """
     os.makedirs(certs_dir, exist_ok=True)
     ca_cert_path = os.path.join(certs_dir, "ca.pem")
+    ca_key_path = os.path.join(certs_dir, "ca_key.pem")
 
-    if os.path.exists(ca_cert_path):
+    new_root = False
+    if os.path.exists(ca_cert_path) and os.path.exists(ca_key_path):
         ca = CertificateAuthority.load_from_dir(certs_dir)
     else:
+        # A fresh clone has ca.pem but not the git-ignored ca_key.pem, and a
+        # CA without its private key can't issue anything, so start a new one.
         ca = CertificateAuthority.create_root()
         ca.save_to_dir(certs_dir)
+        new_root = True
         print(f"[CA] Generated new Root CA certificate in {certs_dir}/ca.pem")
 
-    # Ensure alice and bob exist
+    # Ensure alice and bob exist (reissued under a new root, since the old
+    # certificates were signed by a CA this machine no longer trusts)
     for user in ("alice", "bob"):
         user_cert_path = os.path.join(certs_dir, f"{user}.pem")
         user_key_path = os.path.join(certs_dir, f"{user}_key.pem")
 
-        if not (os.path.exists(user_cert_path) and os.path.exists(user_key_path)):
+        if new_root or not (os.path.exists(user_cert_path) and os.path.exists(user_key_path)):
             user_key = ed25519.Ed25519PrivateKey.generate()
             user_cert = ca.issue_certificate(user, user_key.public_key())
 

@@ -69,7 +69,7 @@ Alice                          Server                          Bob
 4. Alice's client receives Bob's reply, looks up her stored `a`, and
    computes `s = B^a mod p`.
 5. Both sides now hold the same `s` (proven: `A^b = (g^a)^b = g^(ab) =
-   (g^b)^a = B^a mod p`). Each side hashes `s` with SHA-256
+   (g^b)^a = B^a mod p`). Each side runs `s` through HKDF-SHA256
    (`derive_session_key`) to get a fixed-size 256-bit session key, ready to
    use as an AES key in phase 3.
 
@@ -94,7 +94,7 @@ explanation.
 
 | Key | Type | Lifetime | Used for |
 |-----|------|----------|----------|
-| Session key | 32-byte AES key, `SHA-256(DH shared secret)` | One per peer per handshake | Encrypting chat content |
+| Session key | 32-byte AES key, `HKDF-SHA256(DH shared secret)` | One per peer per handshake | Encrypting chat content |
 | Identity key pair | Ed25519 | One per client process | Signing DH values and chat messages |
 
 **Signed handshake.** Each `dh_public` message now also carries the

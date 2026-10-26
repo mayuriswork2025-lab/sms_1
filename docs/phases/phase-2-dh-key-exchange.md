@@ -34,8 +34,8 @@ Bob:   A^b mod p = (g^a)^b mod p = g^(ab) mod p
 ```
 
 `ba == ab`, so both land on the same number — without either side ever
-learning the other's private key. `dh.py` then hashes that raw number
-(SHA-256) into a clean 256-bit session key for phase 3's AES to use.
+learning the other's private key. `dh.py` then runs that raw number
+through HKDF-SHA256 to get a clean 256-bit session key for phase 3's AES to use.
 
 ## The catch
 

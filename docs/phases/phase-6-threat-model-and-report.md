@@ -53,4 +53,5 @@ Here are the limits of our design and how real-world systems handle them:
 - `docs/threat_model.md`: Complete STRIDE threat analysis.
 - `docs/final_report.md`: The complete academic project report, including **Viva Voce Q&A**.
 - `tests/mitm_test.py`: Standalone adversarial MITM test runner.
-- `logs/traffic_capture.log`: Packet capture log with adversary attack traces.
+- `logs/traffic_capture.log`: Trace written by the in-process MITM simulation (`tests/mitm_test.py`); not network evidence.
+- `captures/`: Wireshark `.pcapng` captures of the live MITM runs (`attacks/mitm_proxy.py`).
