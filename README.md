@@ -513,7 +513,7 @@ Add team member names here as the project is developed.
 
 ```text
 Team Members:
-- Student 1
-- Student 2
-- Student 3
+- Mayuri K
+- S P Kavya
+-Anannya
 ```
